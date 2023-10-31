@@ -2,7 +2,7 @@
 
 name: CI
 
-run-name: ${{ github.actor }} is update repo, start building...
+run-name: update repo, start building...
 
 # Controls when the workflow will run
 on:
@@ -61,3 +61,8 @@ jobs:
         uses: actions/upload-pages-artifact@v2
         with:
           path: "./dist"
+      # 9 部署 GitHub Pages
+      - name: Deploy to GitHub Pages(部署到 GitHub Pages)
+        uses: actions/deploy-pages@v2
+        with:
+          token: ${{ secrets.konglingjian }}
