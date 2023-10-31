@@ -35,6 +35,9 @@ const wordlist=computed({
 let filterKeyword=ref(null)
 
 let theme =ref(darkTheme)
+let table_scroll=(Event)=>{
+  console.log(Event)
+}
 </script>
 
 <template>
@@ -57,7 +60,7 @@ let theme =ref(darkTheme)
 
 
   <n-space vertical>
-      <n-input v-model:value="filterKeyword" type="text" tex align='left' placeholder=""/>
+      <n-input v-model:value="filterKeyword" type="text" tex align='left' placeholder="查询"/>
   </n-space>
 
 
@@ -71,6 +74,7 @@ let theme =ref(darkTheme)
         size='small'
         striped
         :single-line='false'
+        @on-scroll='table_scroll'
       />
   </n-space>
   </n-config-provider>
