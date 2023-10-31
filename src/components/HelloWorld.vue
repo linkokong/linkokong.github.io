@@ -10,10 +10,10 @@ import {n2 } from '../dictionary/n2'
 const words={middle_1,middle_2,primary_1,primary_2,n2}
 
 const columns = ref([
-  {title: "", key: "no"},
-  {title: "カタカナ", key: "kana"},
-  {title: "漢字", key: "kanji"},
-  {title: "中文", key: "chinese"},
+  {title: "", key: "no",width:50,className:'column-class'},
+  {title: "カタカナ", key: "kana",className:'column-class'},
+  {title: "漢字", key: "kanji",className:'column-class'},
+  {title: "中文", key: "chinese",className:'column-class'},
 ]);
 const chapValue=ref('primary_2')
 
@@ -81,3 +81,8 @@ let table_scroll=(Event)=>{
   </n-config-provider>
 </template>
 
+<style>
+.column-class{
+  font-size:12px !important;
+}
+</style>
