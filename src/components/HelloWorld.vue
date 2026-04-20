@@ -13,9 +13,13 @@ const words = { middle_1, middle_2, primary_1, primary_2, n2, high_1, high_2 }
 
 // localStorage keys
 const STORAGE_SHOW = 'showRemembered'
-const STORAGE_HIDDEN = 'hiddenWordKeys'
+const STORAGE_HIDDEN = 'hiddenWordNos' // 使用no字段存储，格式更简洁
 
 const showRemembered = ref(localStorage.getItem(STORAGE_SHOW) !== 'false')
+// 迁移：清除旧格式数据（如果存在）
+if (localStorage.getItem('hiddenWordKeys')) {
+  localStorage.removeItem('hiddenWordKeys')
+}
 const hiddenWordKeys = ref(JSON.parse(localStorage.getItem(STORAGE_HIDDEN) || '[]'))
 
 // settings drawer
@@ -73,31 +77,107 @@ function onFloatBtnMouseUp() {
 onMounted(() => {
   window.addEventListener('mousemove', onFloatBtnMouseMove)
   window.addEventListener('mouseup', onFloatBtnMouseUp)
+  window.addEventListener('hashchange', onHashChange)
   floatBtnPos.value = getFloatBtnInitialPos()
   loadScrollPositions()
-  console.log('onMounted firstVisibleIndex:', firstVisibleIndex.value)
-  console.log('onMounted chapValue:', chapValue.value)
   // 初始化当前章节的滚动位置
   setTimeout(() => {
-    console.log('onMounted setTimeout restore, firstVisibleIndex:', firstVisibleIndex.value)
     restoreScrollPosition(chapValue.value)
   }, 1000)  // 加长延时确保表格渲染完成
 })
 
 // wordlist computed
-const activePage = ref('words') // 'words' | 'hidden' 当前页面
+// Parse initial page from URL hash
+function getInitialPage() {
+  const hash = window.location.hash.slice(1) // remove #
+  if (['words', 'hidden', 'quiz'].includes(hash)) {
+    return hash
+  }
+  return 'words'
+}
+
+const activePage = ref(getInitialPage()) // 'words' | 'hidden' | 'quiz' 当前页面
+
+// Watch activePage and update URL hash
+watch(activePage, (val) => {
+  window.location.hash = val
+})
+
+// Listen for hash changes (browser back/forward)
+function onHashChange() {
+  const hash = window.location.hash.slice(1)
+  if (['words', 'hidden', 'quiz'].includes(hash) && hash !== activePage.value) {
+    activePage.value = hash
+  }
+}
 const hiddenChapValue = ref('primary_1')
 let isRestoringScroll = false  // 恢复滚动时暂停保存
+
+// Quiz state - 默认与单词页面选择一致（在 chapValue 定义后初始化）
+const quizChapValue = ref('primary_2')
+const quizWords = ref([])
+const quizIndex = ref(0)
+const quizInput = ref('')
+const quizResult = ref(null) // null | 'correct' | 'wrong'
+const quizBatchSize = ref(5)
+const quizDisplayMode = ref('kanji') // 'kanji' | 'chinese' - what to show as question
+
+// Generate random quiz words (exclude hidden words)
+function generateQuizWords() {
+  const chapWords = (words[quizChapValue.value] || []).filter(
+    item => !hiddenWordKeys.value.includes(wordKey(item))
+  )
+  if (chapWords.length === 0) {
+    quizWords.value = []
+    return
+  }
+
+  // Shuffle and take batch size
+  const shuffled = [...chapWords].sort(() => Math.random() - 0.5)
+  quizWords.value = shuffled.slice(0, Math.min(quizBatchSize.value, shuffled.length))
+  quizIndex.value = 0
+  quizInput.value = ''
+  quizResult.value = null
+  // Randomly decide what to show for this batch
+  quizDisplayMode.value = Math.random() > 0.5 ? 'kanji' : 'chinese'
+}
+
+// Check quiz answer
+function checkQuizAnswer() {
+  if (quizWords.value.length === 0) return
+  
+  const current = quizWords.value[quizIndex.value]
+  const input = quizInput.value.trim()
+  
+  // User can answer with any of the other two fields
+  const validAnswers = [current.kanji, current.kana, current.chinese]
+  quizResult.value = validAnswers.includes(input) ? 'correct' : 'wrong'
+}
+
+// Next quiz word
+function nextQuizWord() {
+  if (quizIndex.value < quizWords.value.length - 1) {
+    quizIndex.value++
+    quizInput.value = ''
+    quizResult.value = null
+  } else {
+    // Batch complete, generate new batch
+    generateQuizWords()
+  }
+}
+
+// Start quiz
+function startQuiz() {
+  generateQuizWords()
+}
 
 // 滚动事件处理 - 监听表格滚动（需要在 activePage 和 hiddenChapValue 定义后）
 function onTableScroll(e) {
   const scrollTop = e.target.scrollTop
   const index = Math.round(scrollTop / 24)  // 估算行索引
-  console.log('onTableScroll:', scrollTop, index, 'isRestoring:', isRestoringScroll)
   if (index >= 0) {
     // 根据当前页面和章节保存位置
     const key = activePage.value === 'words' ? chapValue.value : 'hidden_' + hiddenChapValue.value
-    console.log('save key:', key, 'index:', index)
     // 恢复滚动时不保存
     if (!isRestoringScroll) {
       saveScrollPosition(key, index)
@@ -108,6 +188,7 @@ function onTableScroll(e) {
 onUnmounted(() => {
   window.removeEventListener('mousemove', onFloatBtnMouseMove)
   window.removeEventListener('mouseup', onFloatBtnMouseUp)
+  window.removeEventListener('hashchange', onHashChange)
 })
 
 // selected row for long-press
@@ -119,10 +200,12 @@ const columns = ref([
   { title: "", key: "no", width: 50, className: 'column-class' },
   { title: "かな", key: "kana", className: 'column-class' },
   { title: "漢字", key: "kanji", className: 'column-class' },
+  { title: "词性", key: "part", width: 60, className: 'column-class' },
   { title: "中文", key: "chinese", className: 'column-class' },
 ])
 
 const chapValue = ref(localStorage.getItem('defaultChap') || 'primary_2')
+quizChapValue.value = chapValue.value  // 同步初始值
 const firstVisibleIndex = ref({})  // 存储每个章节第一个可见行的索引
 
 // 加载保存的滚动位置
@@ -139,7 +222,6 @@ function loadScrollPositions() {
 
 // 保存滚动位置
 function saveScrollPositions() {
-  console.log('saveScrollPositions:', JSON.stringify(firstVisibleIndex.value))
   localStorage.setItem('scrollPositions', JSON.stringify(firstVisibleIndex.value))
 }
 
@@ -158,7 +240,7 @@ const tabOptions = [
 // build unique key for a word entry
 function wordKey(item) {
   if (!item) return ''
-  return `${item.kana || ''}||${item.kanji || ''}||${item.chinese || ''}`
+  return String(item.no || '')
 }
 
 // hide a word (记住)
@@ -189,8 +271,9 @@ function toggleShowRemembered(val) {
 
 watch(chapValue, (val) => {
   localStorage.setItem('defaultChap', val)
+  // 同步更新测试页面的章节选择
+  quizChapValue.value = val
   // 延迟恢复滚动位置，确保数据加载完成
-  console.log('watch chapValue triggered:', val, 'saved index:', firstVisibleIndex.value[val])
   setTimeout(() => {
     restoreScrollPosition(val)
   }, 300)
@@ -205,18 +288,14 @@ function saveScrollPosition(chap, index) {
 // 恢复滚动位置 - 遍历所有元素找滚动容器
 function restoreScrollPosition(chap) {
   const saved = firstVisibleIndex.value[chap]
-  console.log('restoreScrollPosition:', chap, 'saved:', saved)
-  
   const targetScrollTop = (typeof saved === 'number' && saved > 0) ? saved * 24 : 0
-  console.log('targetScrollTop:', targetScrollTop)
-  
   isRestoringScroll = true
-  
+
   // 遍历所有DOM元素找滚动容器
   const doRestore = () => {
     const allElements = document.querySelectorAll('*')
     let restored = false
-    
+
     for (const el of allElements) {
       const style = getComputedStyle(el)
       if (style.overflowY === 'auto' || style.overflowY === 'scroll' || style.overflowY === 'overlay') {
@@ -224,17 +303,12 @@ function restoreScrollPosition(chap) {
         // 直接设置滚动位置
         el.scrollTop = targetScrollTop
         if (el.scrollTop !== oldTop) {
-          console.log('restored:', el.className, 'from', oldTop, 'to', el.scrollTop)
           restored = true
           break
         }
       }
     }
-    
-    if (!restored) {
-      console.log('no scroll element found')
-    }
-    
+
     isRestoringScroll = false
   }
   
@@ -364,13 +438,9 @@ const hiddenWordlist = computed(() => {
     return allWordsForHiddenPage.value
   }
   return allWordsForHiddenPage.value.filter(item => {
-    // 找出这个单词属于哪个章节
-    for (const chap of Object.keys(words)) {
-      if (words[chap].includes(item)) {
-        return chap === hiddenChapValue.value
-      }
-    }
-    return false
+    // 通过 no 字段匹配单词所在的章节
+    const chapWords = words[hiddenChapValue.value] || []
+    return chapWords.some(w => w.no === item.no)
   })
 })
 
@@ -424,8 +494,8 @@ const wordlist = computed({
       </n-tabs>
     </n-space>
 
-    <!-- table -->
-    <div class="table-wrapper">
+    <!-- table - only show on words and hidden pages -->
+    <div v-show="activePage !== 'quiz'" class="table-wrapper">
     <n-data-table
       :columns="columns"
       :data="wordlist"
@@ -438,6 +508,87 @@ const wordlist = computed({
       @scroll="onTableScroll"
       @mouseup="onRowMouseUp"
     />
+    </div>
+
+    <!-- Quiz Page -->
+    <div v-show="activePage === 'quiz'" class="quiz-container">
+      <n-space vertical size="large">
+        <!-- Quiz Settings -->
+        <n-space justify="space-between" align="center">
+          <n-select
+            v-model:value="quizChapValue"
+            :options="tabOptions"
+            size="small"
+            style="width: 140px"
+            @update:value="generateQuizWords"
+          />
+          <n-button type="primary" size="small" @click="generateQuizWords">
+            换一批
+          </n-button>
+        </n-space>
+        
+        <!-- Quiz Content -->
+        <div v-if="quizWords.length > 0" class="quiz-card">
+          <div class="quiz-progress">
+            {{ quizIndex + 1 }} / {{ quizWords.length }}
+          </div>
+          
+          <div class="quiz-question">
+            <template v-if="quizDisplayMode === 'kanji'">
+              <!-- Show kanji if available, otherwise show kana -->
+              <div class="quiz-show">{{ quizWords[quizIndex].kanji || quizWords[quizIndex].kana }}</div>
+              <div class="quiz-hint">{{ quizWords[quizIndex].kanji ? '请填写读音或中文' : '请填写汉字或中文' }}</div>
+            </template>
+            <template v-else>
+              <!-- Show chinese if available, otherwise show kana -->
+              <div class="quiz-show">{{ quizWords[quizIndex].chinese || quizWords[quizIndex].kana }}</div>
+              <div class="quiz-hint">{{ quizWords[quizIndex].chinese ? '请填写日文' : '请填写汉字或中文' }}</div>
+            </template>
+          </div>
+          
+          <n-input
+            v-model:value="quizInput"
+            type="text"
+            placeholder="输入任意匹配的值"
+            size="large"
+            :status="quizResult"
+            @keyup.enter="quizResult === null ? checkQuizAnswer() : null"
+          />
+          
+          <div v-if="quizResult === 'correct'" class="quiz-feedback correct">
+            ✓ 正确！
+          </div>
+          <div v-else-if="quizResult === 'wrong'" class="quiz-feedback wrong">
+            ✗ 错误<br>
+            词性：{{ quizWords[quizIndex].part }}<br>
+            汉字：{{ quizWords[quizIndex].kanji }}<br>
+            假名：{{ quizWords[quizIndex].kana }}<br>
+            中文：{{ quizWords[quizIndex].chinese }}
+          </div>
+          
+          <n-space justify="center" style="margin-top: 16px;">
+            <n-button 
+              v-if="quizResult === null" 
+              type="primary" 
+              @click="checkQuizAnswer"
+              :disabled="!quizInput.trim()"
+            >
+              检查
+            </n-button>
+            <n-button 
+              v-else 
+              type="success" 
+              @click="nextQuizWord"
+            >
+              {{ quizIndex < quizWords.length - 1 ? '下一个' : '新一组' }}
+            </n-button>
+          </n-space>
+        </div>
+        
+        <div v-else class="quiz-empty">
+          点击"开始"生成测试单词
+        </div>
+      </n-space>
     </div>
 
   <!-- selected word action bar -->
@@ -465,7 +616,7 @@ const wordlist = computed({
 
           <n-space vertical :size="8">
             <n-space justify="space-between" align="center">
-              <span>默认 Tab</span>
+              <span>默认生词本</span>
               <n-select
                 v-model:value="chapValue"
                 :options="tabOptions"
@@ -507,6 +658,18 @@ const wordlist = computed({
           </svg>
         </span>
         <span class="nav-label">单词</span>
+      </div>
+      <div 
+        class="nav-item" 
+        :class="{ active: activePage === 'quiz' }"
+        @click="activePage = 'quiz'"
+      >
+        <span class="nav-icon">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+            <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
+          </svg>
+        </span>
+        <span class="nav-label">测试</span>
       </div>
       <div 
         class="nav-item" 
@@ -633,6 +796,57 @@ td[data-col-key='chinese'] {
 }
 .fade-enter-from, .fade-leave-to {
   opacity: 0;
+}
+
+/* quiz page styles */
+.quiz-container {
+  padding: 16px;
+  height: calc(100vh - 80px);
+  overflow-y: auto;
+}
+.quiz-card {
+  background: #252525;
+  border-radius: 12px;
+  padding: 24px;
+  text-align: center;
+}
+.quiz-progress {
+  font-size: 14px;
+  color: #888;
+  margin-bottom: 16px;
+}
+.quiz-question {
+  margin-bottom: 24px;
+}
+.quiz-show {
+  font-size: 32px;
+  color: #fff;
+  font-weight: bold;
+  margin: 16px 0;
+  line-height: 1.4;
+}
+.quiz-hint {
+  font-size: 14px;
+  color: #888;
+  margin: 8px 0;
+  line-height: 1.6;
+}
+.quiz-feedback {
+  margin-top: 16px;
+  font-size: 16px;
+  font-weight: bold;
+}
+.quiz-feedback.correct {
+  color: #18a058;
+}
+.quiz-feedback.wrong {
+  color: #d03050;
+}
+.quiz-empty {
+  text-align: center;
+  color: #666;
+  padding: 40px;
+  font-size: 14px;
 }
 
 /* bottom navigation bar */
