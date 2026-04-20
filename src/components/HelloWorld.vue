@@ -801,8 +801,8 @@ td[data-col-key='chinese'] {
 /* quiz page styles */
 .quiz-container {
   padding: 16px;
-  height: calc(100vh - 80px);
-  overflow-y: auto;
+  padding-bottom: 80px;
+  min-height: calc(100vh - 80px);
 }
 .quiz-card {
   background: #252525;
