@@ -2,14 +2,28 @@ const CACHE_NAME = 'japanese-words-v1'
 const urlsToCache = [
   '/',
   '/index.html',
-  '/rich.png'
+  '/vite.svg'
 ]
 
-// Install event - cache basic files
+// Install event - cache basic files (with error handling)
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) => {
-      return cache.addAll(urlsToCache)
+      // Cache each URL individually to handle failures gracefully
+      return Promise.all(
+        urlsToCache.map(url =>
+          fetch(url)
+            .then(response => {
+              if (response.ok) {
+                return cache.put(url, response)
+              }
+              console.log('Failed to cache:', url)
+            })
+            .catch(err => {
+              console.log('Error caching:', url, err)
+            })
+        )
+      )
     })
   )
   self.skipWaiting()

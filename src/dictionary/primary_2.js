@@ -455,7 +455,7 @@ export const primary_2=[
   {'no':454,'kana':'せいせき','kanji':'成績','part':'名','chinese':'成绩'},
   {'no':455,'kana':'けいさん','kanji':'計算','part':'名','chinese':'计算'},
   {'no':456,'kana':'けしゴム','kanji':'消し～','part':'名','chinese':'橡皮'},
-  {'no':457,'kana':'は','kanji':'歯','part':'名','chinese':'叶子'},
+  {'no':457,'kana':'は','kanji':'歯','part':'名','chinese':'牙齿'},
   {'no':458,'kana':'ビタミンざい','kanji':'～剤','part':'名','chinese':'维生素片剂'},
   {'no':459,'kana':'ちゅうこ','kanji':'中古','part':'名','chinese':'二手货，旧货'},
   {'no':460,'kana':'きかい','kanji':'機会','part':'名','chinese':'机会'},
