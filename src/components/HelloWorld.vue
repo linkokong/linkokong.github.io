@@ -191,10 +191,28 @@ onUnmounted(() => {
   window.removeEventListener('hashchange', onHashChange)
 })
 
-// selected row for long-press
-const selectedWord = ref(null)
-const LONG_PRESS_MS = 500
-let pressTimer = null
+// 双击计时器状态
+let lastClickTime = 0
+let lastClickKey = null  // 存 key 字符串
+
+function makeCellClickHandler(row) {
+  const key = wordKey(row)
+  const now = Date.now()
+  
+  if (now - lastClickTime < 350 && lastClickKey === key) {
+    // 双击同一行
+    if (activePage.value === 'words') {
+      hideWord(row)
+    } else if (activePage.value === 'hidden') {
+      unhideWord(key)
+    }
+    lastClickTime = 0
+    lastClickKey = null
+  } else {
+    lastClickTime = now
+    lastClickKey = key
+  }
+}
 
 const columns = ref([
   { title: "", key: "no", width: 50, className: 'column-class' },
@@ -203,6 +221,10 @@ const columns = ref([
   { title: "词性", key: "part", width: 60, className: 'column-class' },
   { title: "中文", key: "chinese", className: 'column-class' },
 ])
+
+function createRowProps(row) {
+  return { onClick: () => makeCellClickHandler(row) }
+}
 
 const chapValue = ref(localStorage.getItem('defaultChap') || 'primary_2')
 quizChapValue.value = chapValue.value  // 同步初始值
@@ -244,19 +266,59 @@ function wordKey(item) {
 }
 
 // hide a word (记住)
+// 统一回退栈：每次操作只记录一条，可以是 'hide' 或 'restore'
+const undoStack = ref([])
+const toastMsg = ref('')
+let toastTimer = null
+
+function showToast(msg, duration = 4000) {
+  toastMsg.value = msg
+  if (toastTimer) clearTimeout(toastTimer)
+  toastTimer = setTimeout(() => {
+    toastMsg.value = ''
+  }, duration)
+}
+
 function hideWord(item) {
   const key = wordKey(item)
   if (!hiddenWordKeys.value.includes(key)) {
     hiddenWordKeys.value.push(key)
     localStorage.setItem(STORAGE_HIDDEN, JSON.stringify(hiddenWordKeys.value))
+    undoStack.value = [] // 新操作清空栈，保持只有一条
+    undoStack.value.push({ type: 'hide', key, label: item.kana })
+    if (undoStack.value.length > 20) undoStack.value.shift()
+    showToast(`已记住：${item.kana}`, 4000)
   }
-  cancelSelect()
 }
 
-// clear single hidden word
 function unhideWord(key) {
   hiddenWordKeys.value = hiddenWordKeys.value.filter(k => k !== key)
   localStorage.setItem(STORAGE_HIDDEN, JSON.stringify(hiddenWordKeys.value))
+  // 找到这个 word 的完整数据用于回退时重新隐藏
+  let wordData = null
+  Object.keys(words).forEach(chap => {
+    const found = (words[chap] || []).find(w => wordKey(w) === key)
+    if (found) wordData = found
+  })
+  undoStack.value = [] // 新操作清空栈，保持只有一条
+  undoStack.value.push({ type: 'restore', key, label: wordData?.kana || '' })
+  showToast(`已恢复：${wordData?.kana || ''}`, 4000)
+}
+
+function undoLastHide() {
+  if (undoStack.value.length === 0) return
+  const op = undoStack.value.pop()
+  if (op.type === 'hide') {
+    // 回退隐藏：把 key 从 hiddenWordKeys 中移除
+    hiddenWordKeys.value = hiddenWordKeys.value.filter(k => k !== op.key)
+  } else if (op.type === 'restore') {
+    // 回退恢复：把 key 重新加回 hiddenWordKeys
+    if (!hiddenWordKeys.value.includes(op.key)) {
+      hiddenWordKeys.value.push(op.key)
+    }
+  }
+  localStorage.setItem(STORAGE_HIDDEN, JSON.stringify(hiddenWordKeys.value))
+  showToast('已回退')
 }
 
 function clearAllHidden() {
@@ -322,9 +384,6 @@ function restoreScrollPosition(chap) {
 
 function wordRowClass({ row }) {
   const cls = []
-  if (selectedWord.value && wordKey(row) === wordKey(selectedWord.value)) {
-    cls.push('row-selected')
-  }
   const key = wordKey(row)
   if (hiddenWordKeys.value.includes(key)) {
     cls.push('row-hidden')
@@ -332,62 +391,8 @@ function wordRowClass({ row }) {
   return cls.join(' ')
 }
 
-// long-press detection: action bar shows only after LONG_PRESS_MS
-const showActionBar = ref(false)
-let longPressTimer = null
+// 双击计时器状态
 
-function onRowMouseDown(e, row) {
-  // 阻止右键菜单干扰（桌面端）
-  e.preventDefault()
-  // 阻止事件冒泡
-  e.stopPropagation()
-  
-  longPressTimer = setTimeout(() => {
-    selectedWord.value = row
-    showActionBar.value = true
-    longPressTimer = null
-  }, LONG_PRESS_MS)
-}
-
-function onRowMouseUp() {
-  if (longPressTimer) {
-    clearTimeout(longPressTimer)
-    longPressTimer = null
-  }
-}
-
-// 移动端 touch 事件支持
-function onRowTouchStart(e, row) {
-  e.stopPropagation()
-  longPressTimer = setTimeout(() => {
-    selectedWord.value = row
-    showActionBar.value = true
-    longPressTimer = null
-  }, LONG_PRESS_MS)
-}
-
-function onRowTouchEnd() {
-  if (longPressTimer) {
-    clearTimeout(longPressTimer)
-    longPressTimer = null
-  }
-}
-
-function cancelSelect() {
-  showActionBar.value = false
-  selectedWord.value = null
-}
-
-// row props to attach mouse/touch handler
-function rowPropsGetter(row) {
-  return {
-    onMousedown: (e) => onRowMouseDown(e, row),
-    onMouseup: () => onRowMouseUp(),
-    onTouchstart: (e) => onRowTouchStart(e, row),
-    onTouchend: () => onRowTouchEnd(),
-    onContextmenu: (e) => e.preventDefault() // 禁用右键菜单
-  }
-}
 
 // 获取有已记住单词的章节列表
 const hiddenChapOptions = computed(() => {
@@ -500,13 +505,13 @@ const wordlist = computed({
       :columns="columns"
       :data="wordlist"
       :row-class-name="wordRowClass"
-      :row-props="rowPropsGetter"
       :max-height="viewH - 200"
+      :row-props="createRowProps"
       size="small"
       striped
       :single-line="false"
       @scroll="onTableScroll"
-      @mouseup="onRowMouseUp"
+
     />
     </div>
 
@@ -591,20 +596,19 @@ const wordlist = computed({
       </n-space>
     </div>
 
-  <!-- selected word action bar -->
+  <!-- Toast -->
   <Teleport to="body">
     <transition name="fade">
-      <div v-if="selectedWord" class="action-bar">
-        <span class="action-hint">选择：{{ selectedWord.kana }} {{ selectedWord.kanji }}</span>
-        <!-- 单词页面：记住按钮；已记住页面：恢复按钮 -->
-        <n-button v-if="activePage === 'words'" type="success" size="small" @click="hideWord(selectedWord)">
-          记住 ✓
-        </n-button>
-        <n-button v-else type="warning" size="small" @click="unhideWord(wordKey(selectedWord)); cancelSelect()">
-          恢复
-        </n-button>
-        <n-button class="cancel-btn" size="small" @click="cancelSelect">
-          取消
+      <div v-if="toastMsg" class="toast-bar">
+        <span>{{ toastMsg }}</span>
+        <n-button
+          v-if="undoStack.length > 0"
+          type="warning"
+          size="tiny"
+          quaternary
+          @click="undoLastHide"
+        >
+          回退
         </n-button>
       </div>
     </transition>
@@ -728,15 +732,12 @@ td[data-col-key='chinese'] {
   color: #f46666 !important;
   font-size: 10px !important;
 }
-.row-selected td {
-  background-color: rgba(24, 160, 88, 0.2) !important;
-}
 .row-hidden td {
   opacity: 0.4;
 }
 
-/* action bar */
-.action-bar {
+/* toast */
+.toast-bar {
   position: fixed;
   bottom: 80px;
   left: 50%;
@@ -747,25 +748,12 @@ td[data-col-key='chinese'] {
   padding: 10px 16px;
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
   z-index: 9998;
   box-shadow: 0 4px 16px rgba(0,0,0,0.4);
-}
-.action-hint {
-  font-size: 13px;
+  font-size: 14px;
   color: #ccc;
-  max-width: 200px;
-  overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
-}
-.cancel-btn {
-  background: #333 !important;
-  color: #fff !important;
-  border: none !important;
-}
-.cancel-btn:hover {
-  background: #444 !important;
 }
 
 /* draggable float btn */
